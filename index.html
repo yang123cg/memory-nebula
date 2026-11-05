@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>记忆星云</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#05070f;overflow:hidden;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#c7d4ee}
+  canvas{display:block;position:fixed;inset:0}
+  #hud{position:fixed;left:26px;top:22px;pointer-events:none;letter-spacing:.4px}
+  #hud h1{font-size:19px;font-weight:500;color:#dce6fb;letter-spacing:2px}
+  #hud .sub{margin-top:7px;font-size:12px;color:#6f84ad;line-height:1.9}
+  #hud .sub b{color:#9fb6dd;font-weight:500}
+  #spark{position:fixed;right:26px;top:24px;opacity:.75}
+  #spark .cap{font-size:11px;color:#5f729a;text-align:right;margin-bottom:6px;letter-spacing:1px}
+  #foot{position:fixed;left:26px;bottom:22px;display:flex;gap:10px;align-items:center}
+  #foot input{width:250px;padding:7px 11px;border-radius:7px;border:1px solid #1c2740;background:#0b1121;color:#c7d4ee;font-size:12px;outline:none}
+  #foot input:focus{border-color:#33456d}
+  #foot button{padding:7px 13px;border-radius:7px;border:1px solid #1c2740;background:#111a2e;color:#9fb6dd;font-size:12px;cursor:pointer}
+  #foot button:hover{background:#17233c}
+  #tip{font-size:11px;color:#4d5d80;margin-left:4px}
+  #panel{position:fixed;right:0;top:0;height:100%;width:400px;background:rgba(7,11,22,.96);border-left:1px solid #17213a;padding:30px 26px;overflow:auto;transform:translateX(105%);transition:transform .35s ease}
+  #panel.on{transform:none}
+  #panel h2{font-size:17px;color:#e2ebff;font-weight:500}
+  #panel .sub{margin-top:6px;font-size:12px;color:#6f84ad}
+  #panel h3{margin-top:20px;font-size:12px;color:#7f93bb;font-weight:500;letter-spacing:1px}
+  #panel ul{margin-top:7px;padding-left:16px}
+  #panel li{font-size:13px;line-height:1.75;color:#b6c4e0;margin-bottom:4px}
+  #panel .style{margin-top:7px;font-size:13px;line-height:1.8;color:#a9b8d6}
+  #panel .err{margin-top:24px;font-size:13px;color:#c4748a;line-height:1.8}
+  #panel .tag{display:inline-block;margin:6px 6px 0 0;padding:3px 9px;border-radius:20px;background:#141e34;color:#8fa6cf;font-size:11px}
+  #close{position:absolute;right:20px;top:18px;font-size:18px;color:#4e5f82;cursor:pointer;background:none;border:0}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <h1>记 忆 星 云</h1>
+  <div class="sub" id="stats"></div>
+</div>
+
+<div id="spark">
+  <div class="cap">最近变化</div>
+  <canvas id="sp" width="150" height="42"></canvas>
+</div>
+
+<div id="foot">
+  <input id="tok" placeholder="我有邀请码，贴这里">
+  <button id="go">只看我的那颗星</button>
+  <span id="tip"></span>
+</div>
+
+<div id="panel">
+  <button id="close">×</button>
+  <h2 id="pname">我的那颗星</h2>
+  <div class="sub" id="psub"></div>
+  <div id="pbody"></div>
+</div>
+
+<script>
+(async function(){
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W=0,H=0,dpr=Math.min(2,window.devicePixelRatio||1),bg=null;
+const SPHERE={cx:0,cy:0,R:0,ry:0,rx:0.34,spin:0.00006,last:0};
+let DATA=null;
+
+function resize(){
+  W=innerWidth; H=innerHeight;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+  SPHERE.cx=W*0.5; SPHERE.cy=H*0.53; SPHERE.R=Math.min(W,H)*0.30;
+  bg=makeBg();
+}
+function makeBg(){
+  const c=document.createElement('canvas'); c.width=Math.round(W*dpr); c.height=Math.round(H*dpr);
+  const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const grad=g.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#070b18'); grad.addColorStop(.45,'#0a1022'); grad.addColorStop(1,'#04060d');
+  g.fillStyle=grad; g.fillRect(0,0,W,H);
+  for(let i=0;i<560;i++){
+    const x=Math.random()*W,y=Math.random()*H,r=Math.random()*1.2+0.15,o=Math.random()*0.4+0.05;
+    g.beginPath(); g.arc(x,y,r,0,6.283); g.fillStyle='rgba(190,215,255,'+o.toFixed(2)+')'; g.fill();
+  }
+  return c;
+}
+
+function spherePoint(i,n){
+  const GA=Math.PI*(3-Math.sqrt(5));
+  const yy=1-(i/Math.max(1,n-1))*2, rad=Math.sqrt(Math.max(0,1-yy*yy)), th=GA*i;
+  return {x:Math.cos(th)*rad, y:yy, z:Math.sin(th)*rad};
+}
+
+function layout(){
+  const ps=DATA.people;
+  const n=ps.length;
+  SPHERE.nodes=ps.map((p,i)=>{
+    const s=spherePoint(i,n);
+    return {i,bx:s.x,by:s.y,bz:s.z,m:p.m,a:p.a,r:1.6+Math.min(5.2,Math.sqrt(p.m+1)*1.15),
+      th0:Math.random()*6.283,ph0:Math.asin(Math.max(-1,Math.min(1,s.y))),
+      dth:(Math.random()<.5?-1:1)*0.00011, dph:(Math.random()<.5?-1:1)*0.00005,
+      wob:Math.random()*6.283, wob2:Math.random()*6.283};
+  });
+  const m=DATA.groups.length;
+  SPHERE.gals=DATA.groups.map((g,i)=>{
+    const RG=Math.min(W,H)*0.50;
+    const ang=-Math.PI/2+(i/Math.max(1,m))*6.283+0.5;
+    return {i, x:SPHERE.cx+Math.cos(ang)*RG, y:SPHERE.cy+Math.sin(ang)*RG*0.86,
+      R:Math.min(118,52+Math.sqrt(g.m+1)*3.2), rot:ang*1.7, msgs:g.m, mem:g.c,
+      jit:Array.from({length:108},()=>({jx:(Math.random()-.5)*0.42, r:Math.random()*0.35, b:0.5+Math.random()*0.5}))};
+  });
+}
+
+function draw(ms){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.drawImage(bg,0,0,W,H);
+
+  const hz=ctx.createRadialGradient(SPHERE.cx,SPHERE.cy,0,SPHERE.cx,SPHERE.cy,Math.min(W,H)*0.52);
+  hz.addColorStop(0,'rgba(70,110,200,.10)'); hz.addColorStop(.5,'rgba(120,90,210,.06)'); hz.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=hz; ctx.beginPath(); ctx.arc(SPHERE.cx,SPHERE.cy,Math.min(W,H)*0.52,0,6.283); ctx.fill();
+
+  const nodes=SPHERE.nodes.map(s=>{
+    let th=s.th0+ms*s.dth+0.05*Math.sin(ms*0.00016+s.wob);
+    let ph=s.ph0+0.04*Math.sin(ms*0.00011+s.wob2);
+    ph=Math.max(-1.4,Math.min(1.4,ph));
+    const bx=Math.cos(ph)*Math.cos(th), by=Math.sin(ph), bz=Math.cos(ph)*Math.sin(th);
+    // 全局自转
+    const a=SPHERE.ry, ca=Math.cos(a), sa=Math.sin(a);
+    let x1=bx*ca - bz*sa, z1=bx*sa + bz*ca;
+    const cb=Math.cos(SPHERE.rx), sb=Math.sin(SPHERE.rx);
+    let y2=by*cb - z1*sb, z2=by*sb + z1*cb;
+    return {...s, x:SPHERE.cx+x1*SPHERE.R, y:SPHERE.cy+y2*SPHERE.R, z:z2, dep:(z2+1)/2};
+  });
+
+  // 连线（匿名，只表示"有关系"）
+  ctx.lineWidth=0.6;
+  for(const [a,b,t] of DATA.links){
+    const A=nodes[a], B=nodes[b]; if(!A||!B) continue;
+    const dep=(A.dep+B.dep)/2, fade=(0.10+0.42*dep);
+    ctx.strokeStyle = t===1 ? 'rgba(96,160,255,'+fade.toFixed(3)+')'
+                   : t===0 ? 'rgba(120,225,200,'+(fade*0.8).toFixed(3)+')'
+                           : 'rgba(170,150,255,'+(fade*0.7).toFixed(3)+')';
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+  }
+
+  // 群星系：星链
+  for(const s of SPHERE.gals){
+    s.rot = 0;
+    const pts=[];
+    for(let arm=0;arm<3;arm++){
+      for(let k=0;k<36;k++){
+        const u=k/35, j=s.jit[arm*36+k];
+        const ang=arm*2.094+u*2.6+j.jx, rr=s.R*(0.13+0.87*u);
+        pts.push([s.x+Math.cos(ang)*rr, s.y+Math.sin(ang)*rr*0.92, j.b]);
+      }
+    }
+    for(let arm=0;arm<3;arm++){
+      for(let k=0;k<35;k++){
+        const a=pts[arm*36+k], b=pts[arm*36+k+1];
+        const d=Math.hypot(a[0]-b[0],a[1]-b[1]);
+        ctx.strokeStyle='rgba(150,190,255,'+Math.min(0.5,0.5*Math.min(1,1.25/Math.max(1,d))).toFixed(3)+')';
+        ctx.lineWidth=1.1; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+      }
+    }
+    for(const p of pts){
+      ctx.beginPath(); ctx.arc(p[0],p[1],1.5+p[2]*1.1,0,6.283);
+      ctx.fillStyle='rgba(198,220,255,'+(0.30+0.55*p[2]).toFixed(2)+')'; ctx.fill();
+    }
+    const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.R);
+    g.addColorStop(0,'rgba(120,150,255,.10)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s.x,s.y,s.R,0,6.283); ctx.fill();
+  }
+
+  // 好友星（无名字）
+  nodes.sort((a,b)=>a.z-b.z);
+  for(const s of nodes){
+    const near=0.40+0.60*s.dep, r=Math.max(1.0,s.r*near);
+    const lum=0.30+0.78*s.dep;
+    ctx.beginPath(); ctx.arc(s.x,s.y,r,0,6.283);
+    ctx.fillStyle='rgba('+Math.round(210*lum+30)+','+Math.round(225*lum+25)+',255,'+(0.35+0.6*s.dep).toFixed(2)+')';
+    ctx.fill();
+    if(s.a>0.45){
+      const gl=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,r*3.4);
+      gl.addColorStop(0,'rgba(190,215,255,'+(0.16*s.a).toFixed(2)+')'); gl.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=gl; ctx.beginPath(); ctx.arc(s.x,s.y,r*3.4,0,6.283); ctx.fill();
+    }
+  }
+}
+
+function frame(t){
+  const ms=t;
+  if(!SPHERE.last) SPHERE.last=ms;
+  const dt=Math.min(64,ms-SPHERE.last); SPHERE.last=ms;
+  SPHERE.ry += dt*SPHERE.spin;
+  draw(ms);
+  requestAnimationFrame(frame);
+}
+
+function stats(){
+  const t=DATA.totals;
+  document.getElementById('stats').innerHTML =
+    '这团星云里有 <b>'+t.friends+'</b> 颗星 · <b>'+t.groups+'</b> 个星系 · <b>'+t.links+'</b> 条引力线<br>'+
+    '其中 <b>'+t.profiles+'</b> 颗星已经沉淀出了记忆，共 <b>'+t.memories+'</b> 条';
+}
+
+function spark(){
+  const c=document.getElementById('sp'), g=c.getContext('2d');
+  const h=window.__hist||[];
+  g.clearRect(0,0,c.width,c.height);
+  if(h.length<2){ g.fillStyle='#3d4c6b'; g.font='10px sans-serif'; g.fillText('还在攒',6,26); return; }
+  const vs=h.map(x=>x.m), mx=Math.max(...vs), mn=Math.min(...vs), rg=Math.max(1,mx-mn);
+  g.beginPath();
+  vs.forEach((v,i)=>{
+    const x=4+(i/(vs.length-1))*(c.width-8), y=c.height-6-((v-mn)/rg)*(c.height-12);
+    i?g.lineTo(x,y):g.moveTo(x,y);
+  });
+  g.strokeStyle='rgba(130,175,255,.75)'; g.lineWidth=1.4; g.stroke();
+}
+
+async function load(){
+  const r=await fetch('data/state.json',{cache:'no-store'});
+  DATA=await r.json();
+  window.__hist = await fetch('data/history.json',{cache:'no-store'}).then(x=>x.json()).catch(()=>[]);
+  layout(); stats(); spark();
+}
+
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function sec(t,arr){return arr&&arr.length?'<h3>'+t+'</h3><ul>'+arr.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'';}
+function b64(s){
+  const bin=atob(s), out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+  return out;
+}
+function hex(buf){return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function openMe(token){
+  const panel=document.getElementById('panel');
+  panel.classList.add('on');
+  document.getElementById('pname').textContent='我的那颗星';
+  document.getElementById('psub').textContent='正在找…';
+  document.getElementById('pbody').innerHTML='';
+  try{
+    const raw=new TextEncoder().encode(token.trim());
+    const digest=await crypto.subtle.digest('SHA-256',raw);
+    const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['decrypt']);
+    const r=await fetch('data/people/'+hex(digest).slice(0,32)+'.json',{cache:'no-store'});
+    if(!r.ok) throw new Error('404');
+    const blob=await r.json();
+    const iv=b64(blob.iv), ct=b64(blob.ct), tag=b64(blob.tag);
+    const merged=new Uint8Array(ct.length+tag.length);
+    merged.set(ct,0); merged.set(tag,ct.length);
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv,tagLength:128},key,merged);
+    const p=JSON.parse(new TextDecoder().decode(plain));
+    document.getElementById('pname').textContent=p.name;
+    document.getElementById('psub').textContent=(p.city?'在'+p.city+' · ':'')+'聊过 '+p.msgCount+' 条 · 沉淀记忆 '+p.mems+' 条';
+    let h=sec('事实',p.facts)+sec('喜好',p.prefs)+sec('近况',p.events);
+    if(p.style) h+='<h3>语气</h3><div class="style">'+esc(p.style)+'</div>';
+    h+='<div><span class="tag">看过 '+p.historyCount+' 条历史</span></div>';
+    if(!p.mems) h+='<div class="style" style="margin-top:14px;color:#5d6f96">还没攒够聊天，暂时没提炼出档案。</div>';
+    document.getElementById('pbody').innerHTML=h;
+  }catch(e){
+    document.getElementById('psub').textContent='';
+    document.getElementById('pbody').innerHTML='<div class="err">这个邀请码不对，或者对应的星星还没点亮。<br>邀请码是一长串十六进制字符，别漏字符。</div>';
+  }
+}
+
+document.getElementById('go').onclick=()=>{
+  const v=document.getElementById('tok').value.trim();
+  if(!v){ document.getElementById('tip').textContent='先贴邀请码'; return; }
+  location.hash=v; openMe(v);
+};
+document.getElementById('close').onclick=()=>document.getElementById('panel').classList.remove('on');
+
+addEventListener('resize',()=>{resize(); if(DATA) layout();});
+addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('panel').classList.remove('on'); });
+
+resize();
+await load();
+requestAnimationFrame(frame);
+if(location.hash.length>10) openMe(location.hash.slice(1));
+})();
+</script>
+</body>
+</html>
