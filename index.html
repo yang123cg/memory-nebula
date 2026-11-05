@@ -47,8 +47,8 @@
 </div>
 
 <div id="foot">
-  <input id="tok" placeholder="我有邀请码，贴这里">
-  <button id="go">只看我的那颗星</button>
+  <input id="tok" placeholder="6 位号码" maxlength="6" inputmode="numeric">
+  <button id="go">看我的那颗星</button>
   <span id="tip"></span>
 </div>
 
@@ -239,12 +239,16 @@ async function openMe(token){
   document.getElementById('psub').textContent='正在找…';
   document.getElementById('pbody').innerHTML='';
   try{
-    const raw=new TextEncoder().encode(token.trim());
-    const digest=await crypto.subtle.digest('SHA-256',raw);
-    const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['decrypt']);
-    const r=await fetch('data/people/'+hex(digest).slice(0,32)+'.json',{cache:'no-store'});
+    const code=token.trim().replace(/\s/g,'');
+    if(!/^\d{6}$/.test(code)) throw new Error('bad code');
+    const fnHex=hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('nebula|'+code)));
+    const r=await fetch('data/people/'+fnHex.slice(0,32)+'.json',{cache:'no-store'});
     if(!r.ok) throw new Error('404');
     const blob=await r.json();
+    const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(code),{name:'PBKDF2'},false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey(
+      {name:'PBKDF2',salt:new TextEncoder().encode(blob.salt||'nebula-v1'),iterations:blob.iter||310000,hash:'SHA-256'},
+      base,{name:'AES-GCM',length:256},false,['decrypt']);
     const iv=b64(blob.iv), ct=b64(blob.ct), tag=b64(blob.tag);
     const merged=new Uint8Array(ct.length+tag.length);
     merged.set(ct,0); merged.set(tag,ct.length);
@@ -259,7 +263,7 @@ async function openMe(token){
     document.getElementById('pbody').innerHTML=h;
   }catch(e){
     document.getElementById('psub').textContent='';
-    document.getElementById('pbody').innerHTML='<div class="err">这个邀请码不对，或者对应的星星还没点亮。<br>邀请码是一长串十六进制字符，别漏字符。</div>';
+    document.getElementById('pbody').innerHTML='<div class="err">这个号码不对，或者对应的星星还没点亮。<br>号码是 6 位数字，比如 482913。</div>';
   }
 }
 
